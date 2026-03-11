@@ -1,0 +1,80 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  apiKey    String   @unique @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sellers Seller[]
+  links   RotationLink[]
+}
+
+model Seller {
+  id          String   @id @default(cuid())
+  name        String
+  phone       String?
+  email       String?
+  redirectUrl String   // wa.me link or custom URL
+  position    Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  orgId String
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  leads Lead[]
+}
+
+model RotationLink {
+  id           String   @id @default(cuid())
+  name         String
+  slug         String   @unique
+  currentIndex Int      @default(0)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  orgId String
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  leads Lead[]
+}
+
+model Lead {
+  id         String   @id @default(cuid())
+  sourceIp   String?
+  userAgent  String?
+  referer    String?
+  extraData  String?  // JSON string for additional data
+  createdAt  DateTime @default(now())
+
+  sellerId String
+  seller   Seller @relation(fields: [sellerId], references: [id])
+
+  linkId String
+  link   RotationLink @relation(fields: [linkId], references: [id])
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  orgId     String
+  role      String   @default("admin")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
