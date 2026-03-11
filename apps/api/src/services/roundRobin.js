@@ -1,49 +1,50 @@
 const prisma = require('../lib/prisma');
 
 /**
- * Round-robin algorithm:
- * - Gets all active sellers for a link's org, sorted by position
- * - Uses atomic transaction to read currentIndex and increment it
- * - Returns selected seller
+ * Round-robin algorithm (atomic, concurrency-safe):
+ * - Uses a single atomic UPDATE ... RETURNING to increment the index
+ *   and read the previous value in one DB round-trip.
+ * - This prevents race conditions in serverless environments where
+ *   multiple instances can execute simultaneously.
  */
 async function getNextSeller(linkId) {
-  return await prisma.$transaction(async (tx) => {
-    // Lock and get the link
-    const link = await tx.rotationLink.findUnique({
-      where: { id: linkId },
-      include: {
-        org: {
-          include: {
-            sellers: {
-              where: { isActive: true },
-              orderBy: { position: 'asc' },
-            },
-          },
-        },
-      },
-    });
+  // Atomically increment currentIndex and return the value BEFORE the increment.
+  // Single SQL operation — no race condition possible.
+  const result = await prisma.$queryRaw`
+    UPDATE "RotationLink"
+    SET "currentIndex" = "currentIndex" + 1
+    WHERE id = ${linkId}
+    RETURNING id, "orgId", "isActive", "currentIndex" - 1 AS "prevIndex"
+  `;
 
-    if (!link) throw new Error('Link not found');
-    if (!link.isActive) throw new Error('Link is inactive');
+  if (!result || result.length === 0) {
+    throw new Error('Link not found');
+  }
 
-    const activeSellers = link.org.sellers;
-    if (activeSellers.length === 0) throw new Error('No active sellers available');
+  const link = result[0];
 
-    const selectedIndex = link.currentIndex % activeSellers.length;
-    const selectedSeller = activeSellers[selectedIndex];
+  if (!link.isActive) {
+    throw new Error('Link is inactive');
+  }
 
-    // Atomically increment index
-    await tx.rotationLink.update({
-      where: { id: linkId },
-      data: { currentIndex: link.currentIndex + 1 },
-    });
-
-    return {
-      seller: selectedSeller,
-      index: selectedIndex,
-      total: activeSellers.length,
-    };
+  const activeSellers = await prisma.seller.findMany({
+    where: { orgId: link.orgId, isActive: true },
+    orderBy: { position: 'asc' },
   });
+
+  if (activeSellers.length === 0) {
+    throw new Error('No active sellers available');
+  }
+
+  // prevIndex is the value before increment — safe to use for selection
+  const selectedIndex = Number(link.prevIndex) % activeSellers.length;
+  const selectedSeller = activeSellers[selectedIndex];
+
+  return {
+    seller: selectedSeller,
+    index: selectedIndex,
+    total: activeSellers.length,
+  };
 }
 
 module.exports = { getNextSeller };
