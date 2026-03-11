@@ -53,8 +53,11 @@ app.use('/r', redirectLimiter, redirectRoutes);
 // Error handler (must be last)
 app.use(errorHandler);
 
-app.listen(PORT, () => {
-  console.log(`🚀 RotaLead API running on http://localhost:${PORT}`);
-});
+// Só inicia o servidor HTTP localmente (não no Vercel serverless)
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`🚀 RotaLead API running on http://localhost:${PORT}`);
+  });
+}
 
 module.exports = app;
